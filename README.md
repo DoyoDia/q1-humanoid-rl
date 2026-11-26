@@ -22,6 +22,17 @@
 
 蒸馏后的策略已在实机上运行，控制周期 20 ms，0 次超时。
 
+<table>
+<tr>
+<td align="center"><a href="docs/images/real_nldx.mp4"><img src="docs/images/real_nldx.gif" height="420" alt="实机：nldx，SuperMimic 蒸馏策略"></a></td>
+<td align="center"><img src="docs/images/rollout_nldx.gif" height="420" alt="仿真：同一策略，蓝色为参考动作"></td>
+</tr>
+<tr>
+<td align="center">实机（<a href="docs/images/real_nldx.mp4">mp4</a>）</td>
+<td align="center">仿真，蓝色为参考</td>
+</tr>
+</table>
+
 走路，Walk 接口。每 1.5 s 推扰 0.4 m/s，持续 20 s，16 个环境：
 
 | | 速度跟踪 RMS | 摔倒（站立 / 0.4 / 1.0 m/s） | 停步后 3 s 漂移 |
@@ -107,10 +118,7 @@ make view RUN=<run> LABEL=<名称>       # 打包到 web/run/ 并启动服务
 <tr>
 <td><img src="docs/images/viewer_stage_bt.jpg" alt="讲台：广播体操"></td>
 <td><img src="docs/images/viewer_room_walk.jpg" alt="客厅：WASD 走路"></td>
-</tr>
-<tr>
 <td><img src="docs/images/viewer_terrain_walk.jpg" alt="测试场地"></td>
-<td><img src="docs/images/rollout_nldx.gif" alt="MuJoCo 回放"></td>
 </tr>
 </table>
 
