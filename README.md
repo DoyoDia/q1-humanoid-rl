@@ -6,6 +6,8 @@
   <img src="docs/images/viewer_stage_dance.jpg" width="720" alt="浏览器 sim2sim：讲台场景中的舞蹈跟踪，蓝色为参考动作">
 </p>
 
+训练可以在任意设备上进行：默认后端 mjbatch 只用 CPU，不需要 GPU；有 NVIDIA GPU 时可以切换到 mujoco_warp。sim2sim 直接在浏览器里运行，同样不依赖 GPU。
+
 观测布局、关节顺序、PD 增益和默认姿态统一由 `robots/q1/contract/` 定义，训练、导出、浏览器和机器人端都读取这一份定义。导出的动作策略与机器人 `MIMIC_OPENSOURCE_V2` 接口兼容，可以直接注册为自定义动作。
 
 ## 结果
@@ -73,7 +75,14 @@ python train.py --task walk --backend warp --envs 8192 \
 | 推扰 | 有 |
 | 抱起 | 可选 |
 
-PPO 默认使用非对称 critic。`--backend warp` 使用 mujoco_warp，需要 NVIDIA GPU；默认的 mjbatch 运行在 CPU 上。两种后端端到端约为 27k / 34k 步/s，分别对应 32 线程 CPU / A6000。
+PPO 默认使用非对称 critic。
+
+| 后端 | 硬件 | 环境数 | 端到端 PPO |
+|---|---|---|---|
+| mjbatch（默认） | CPU，32 线程 | 2048 | ~27k 步/s |
+| mujoco_warp（`--backend warp`） | RTX A6000 | 8192 | ~34k 步/s |
+
+两种后端的奖励对拍差 0.01%。
 
 <p align="center">
   <img src="docs/images/train_parallel_envs.jpg" width="720" alt="并行训练环境">
