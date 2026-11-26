@@ -1,0 +1,22 @@
+# vendor archives re-extracted from ~/Downloads/q1/*.zip, plus the mjbatch source clone
+_ref/
+
+# dependencies
+node_modules/
+web/node_modules
+__pycache__/
+*.pyc
+
+# training outputs and browser bundles built from them (regenerate with make train / make demo)
+runs/
+web/run/
+
+# scratch from the make targets
+.http.pid
+.chrome.pid
+
+# visual build references the vendor meshes in _ref/, which are not tracked
+robots/q1/q1_visual.xml
+# the browser viewer's meshes, exported from that visual model (tools/export_web_visual.py)
+web/assets/
+wandb/

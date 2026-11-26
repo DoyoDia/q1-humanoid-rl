@@ -1,0 +1,4 @@
+{
+  "Q1RL_BT": {"wav": "bt.wav", "mp3": "bt.mp3", "offset_s": 0.0},
+  "Q1RL_NLDX_SM": {"wav": "nldx.wav", "mp3": "nldx.mp3", "offset_s": 1.3}
+}

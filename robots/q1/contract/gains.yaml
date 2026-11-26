@@ -1,0 +1,53 @@
+# PD gains, nominal pose and action scaling, per deployment contract.
+# Transcribed from robot:/robot/software/mc/bin/cfg/robot/q1_t2d0/rl/ on 2026-09-19.
+# Order is robots/q1/contract/joints.yaml order (indices 0..21). Do not reorder.
+#
+# stiffness/damping are sent per-joint in aimdk_msgs/JointCommand -- the PD loop runs in
+# the robot's low level at 1 kHz, the policy only supplies the target.
+
+mimic_opensource_v2: &mimic    # the recommended contract
+  action_scale: 0.25
+  kps: [30.0, 30.0, 30.0, 30.0, 20.0, 20.0,
+        30.0, 30.0, 30.0, 30.0, 20.0, 20.0,
+        80.0, 30.0,
+        20.0, 20.0, 20.0, 20.0,
+        20.0, 20.0, 20.0, 20.0]
+  kds: [1.5, 1.5, 1.5, 1.5, 1.5, 1.5,
+        1.5, 1.5, 1.5, 1.5, 1.5, 1.5,
+        3.5, 1.5,
+        1.5, 1.5, 1.5, 1.5,
+        1.5, 1.5, 1.5, 1.5]
+  default_dof_pos: [-0.09, -0.02, -0.02, 0.22, -0.13, 0.0,
+                    -0.09,  0.02,  0.02, 0.22, -0.13, 0.0,
+                     0.0, 0.0,
+                     0.0,  0.18, 0.0, 1.4,
+                     0.0, -0.18, 0.0, 1.4]
+  gravity_guard: {enable: true, threshold_deg: 30.0, count_threshold: 1}
+  auto_next_action: BIPED_WALK_RUN
+
+walk:                           # the vendor's own velocity-command walking policy
+  action_scale: 0.5
+  kps: [40.0, 40.0, 40.0, 40.0, 20.0, 10.0,
+        40.0, 40.0, 40.0, 40.0, 20.0, 10.0,
+        80.0, 30.0,
+        5.0, 5.0, 5.0, 3.0,
+        5.0, 5.0, 5.0, 3.0]
+  kds: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
+        1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
+        2.0, 1.5,
+        0.5, 0.5, 0.5, 0.5,
+        0.5, 0.5, 0.5, 0.5]
+  default_dof_pos: [-0.34, -0.1005, -0.1143, 0.6982, -0.3582,  0.0820,
+                    -0.34,  0.1005,  0.1143, 0.6982, -0.3582, -0.0820,
+                     0.0, 0.0,
+                     0.0,  0.25, 0.0, 1.0,
+                     0.0, -0.25, 0.0, 1.0]
+
+# NOTE: walk.default_dof_pos[3] = 0.6982 (knee) and [4] = -0.3582 (ankle_pitch) both fall
+# OUTSIDE the position limits in the robot's own robot_model.yaml. The robot walks anyway.
+# That is the evidence that those limits are stale and not enforced as position clamps.
+
+# Ours, not the robot's: the browser viewer's velocity-command walking (obs_spec.json
+# `velocity`, q1_rl/envs/velocity.py). The same actuators, pose and scale as the tracking
+# contract, so the viewer can switch policies without re-tuning anything.
+velocity: *mimic

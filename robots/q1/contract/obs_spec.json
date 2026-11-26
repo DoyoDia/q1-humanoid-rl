@@ -1,0 +1,359 @@
+{
+  "$comment": [
+    "Observation layouts the Q1 motion-control runtime expects. Transcribed from",
+    "the robot's cfg/robot/q1_t2d0/rl/*.yaml (firmware of 2026-09).",
+    "Every field index is a half-open slice [start, start+size) into the flat obs vector.",
+    "Joint-ordered fields use robots/q1/contract/joints.yaml order, indices 0..21."
+  ],
+  "mimic_opensource_v2": {
+    "source": "rl/mimic_opensource_v2_config.yaml",
+    "model_type": "MIMIC_OPENSOURCE_V2",
+    "recommended": true,
+    "why": "Standard layout (projected gravity + base angular velocity). The runtime loads this via motion_list.yaml, so the vendor's 1 kHz PD loop, fall guard, FSM and damping-on-exit all come for free.",
+    "obs_dim_valid": 119,
+    "obs_dim_onnx_input": 119,
+    "action_dim": 22,
+    "frame_stack": 1,
+    "fields": [
+      {
+        "name": "motion_ref_pos",
+        "start": 0,
+        "size": 22,
+        "unit": "rad",
+        "note": "reference trajectory joint positions, current frame"
+      },
+      {
+        "name": "motion_ref_vel",
+        "start": 22,
+        "size": 22,
+        "unit": "rad/s",
+        "note": "reference trajectory joint velocities, current frame"
+      },
+      {
+        "name": "ref_gravity",
+        "start": 44,
+        "size": 3,
+        "unit": "-",
+        "note": "gravity in the REFERENCE pelvis frame for the current frame. On the robot it is read from the motion's gravity_guard csv (res/mimic_gravity_guard/<name>.csv: frame_id,gx,gy,gz), and only when that motion has gravity_guard enabled in mimic_opensource_v2_config.yaml CustomConfigs -- otherwise the slot keeps a stale value"
+      },
+      {
+        "name": "gvec",
+        "start": 47,
+        "size": 3,
+        "unit": "-",
+        "note": "gravity direction in the robot's base frame, from the IMU quaternion"
+      },
+      {
+        "name": "base_ang_vel",
+        "start": 50,
+        "size": 3,
+        "unit": "rad/s",
+        "note": "IMU angular velocity, base frame, x obs_scales.ang_vel"
+      },
+      {
+        "name": "joint_pos_err",
+        "start": 53,
+        "size": 22,
+        "unit": "rad",
+        "note": "q - default_dof_pos"
+      },
+      {
+        "name": "joint_vel",
+        "start": 75,
+        "size": 22,
+        "unit": "rad/s",
+        "note": "raw: the config's obs_scales.dof_vel 0.05 is never applied by the runtime (ReadObservations loads only the ang_vel scale), and the vendor normalizers' std of ~1.5 rad/s confirms unscaled training"
+      },
+      {
+        "name": "prev_action",
+        "start": 97,
+        "size": 22,
+        "unit": "-",
+        "note": "raw network output of the previous step"
+      }
+    ],
+    "obs_scales": {
+      "ang_vel": 1.0,
+      "dof_pos": 1.0,
+      "dof_vel": 1.0,
+      "actions": 1.0
+    },
+    "clips": {
+      "obs": 100.0,
+      "action": 100.0
+    },
+    "action_scale": 0.25,
+    "action_meaning": "target_q = default_dof_pos + action_scale * action",
+    "extra_inputs": {
+      "$comment": [
+        "Reference motion, one .npz per entry in the robot's motion_list.yaml (custom.trajectory_path).",
+        "Format read off the robot's own files on 2026-09-19 by decoding the .npy headers inside the zip",
+        "(fly_0422.npz T=400, q1_sit T=558, q1_getUp_v3.3 T=309 -- all identical in structure).",
+        "This is the mjlab / IsaacLab motion-npz convention, which is further evidence the vendor's",
+        "training pipeline is mjlab (their config comments reference sim2sim_mjlab.py)."
+      ],
+      "file": "npz",
+      "arrays": {
+        "fps": {
+          "shape": [
+            "1"
+          ],
+          "dtype": "float64"
+        },
+        "joint_pos": {
+          "shape": [
+            "T",
+            22
+          ],
+          "dtype": "float32",
+          "note": "joints.yaml order"
+        },
+        "joint_vel": {
+          "shape": [
+            "T",
+            22
+          ],
+          "dtype": "float32",
+          "note": "joints.yaml order"
+        },
+        "body_pos_w": {
+          "shape": [
+            "T",
+            26,
+            3
+          ],
+          "dtype": "float32",
+          "note": "world frame"
+        },
+        "body_quat_w": {
+          "shape": [
+            "T",
+            26,
+            4
+          ],
+          "dtype": "float32",
+          "note": "world frame"
+        },
+        "body_lin_vel_w": {
+          "shape": [
+            "T",
+            26,
+            3
+          ],
+          "dtype": "float32",
+          "note": "world frame"
+        },
+        "body_ang_vel_w": {
+          "shape": [
+            "T",
+            26,
+            3
+          ],
+          "dtype": "float32",
+          "note": "world frame"
+        }
+      },
+      "n_bodies": 26,
+      "n_bodies_note": "q1_v3_mc.xml (like q1_v2_mc.xml before it) has nbody=27 including 'world'; 26 == the real bodies, in MJCF body-tree order excluding world (pelvis first). Verified 2026-10-04 against all 16 vendor npz files on the robot: forward kinematics of our q1_v2 MJCF from body 0's pose + joint_pos reproduces body_pos_w to 1e-7 m (the 8 newer files, e.g. getUp v3.1+, lie, lying2Fold) or 7 mm at the ankles (the 8 older ones, made with an earlier shank length). joint_pos is in joints.yaml order; body_quat_w is (w, x, y, z)."
+    },
+    "layout_source": "Not the config comment. The comment at the top of mimic_opensource_v2_config.yaml (116 valid + 3 zero padding, gvec at 44, base_w at 47) is stale: the runtime concatenates motion_pos, motion_vel, ref_gravity, gravity, imu_omega, dof_pos, dof_vel, actions (119, nothing padded); the vendor ONNXs' built-in normalizers show the same layout (two gravity-like triples at 44 and 47, angular velocity at 50, real data in 116..118); and the vendor's own policies track in our sim with this layout and fall with the old one. A policy trained on the old layout convulsed and fell on the robot on 2026-10-05.",
+    "obs_scales_note": "the robot config lists dof_vel: 0.05, but the runtime does not apply it (see joint_vel)"
+  },
+  "walk": {
+    "source": "rl/walk_run.yaml (q1_t2d0; model q1_walkRun_upperPosCtrl_v3.2_20260816.onnx)",
+    "model_type": "Walk",
+    "recommended": false,
+    "why": "Velocity-command locomotion that the robot's runtime already runs: replace the ONNX in walk_run.yaml and the vendor's CPG, arm swing, fall guard and FSM come with it. Coupled to the runtime's CPG phase generator, modelled in q1_rl/envs/walk.py (RuntimeCPG).",
+    "layout_source": "Field order from walk_run.yaml obs_index. Semantics of the fields the config does not spell out (command scaling, pattern, cpg, joint_pos relative or absolute, history order) found on 2026-10-17 by running the vendor's v3.2 policy in our sim under every combination and keeping the one it walks with: commands tracked to 0.04-0.05 m/s RMS over forward / sideways / turn / back / stand, and its own velocity estimator (cv_vel, x2) agrees with the true base velocity to 0.1. With any other pattern, absolute joint angles or a newest-first history it falls within 12 s of the same script; with unscaled commands it walks at 0.0-0.15 m/s when asked for 0.3. tools/check_vendor_walk.py repeats this through Contract.build_obs. NOT yet confirmed against the runtime binary.",
+    "obs_dim_valid": 71,
+    "action_dim": 22,
+    "frame_stack": 5,
+    "fields": [
+      {
+        "name": "imu_ang_vel",
+        "start": 0,
+        "size": 3,
+        "unit": "rad/s",
+        "note": "base angular velocity"
+      },
+      {
+        "name": "imu_euler",
+        "start": 3,
+        "size": 2,
+        "unit": "rad",
+        "note": "roll, pitch only -- NOT a 3-vector projected gravity"
+      },
+      {
+        "name": "command",
+        "start": 5,
+        "size": 3,
+        "unit": "m/s, rad/s",
+        "note": "vx, vy, wz scaled like legged_gym: (2 vx, 2 vy, wz) -- obs_scales lin_vel / ang_vel. Unscaled, the vendor policy walks at half the speed asked. Its sideways speed tracks better at 3 vy (cmd_y bias 1.5 in walk_run.yaml?), so the runtime may scale vy by more; a policy of ours just walks sideways at a different speed per unit."
+      },
+      {
+        "name": "pattern",
+        "start": 8,
+        "size": 2,
+        "unit": "-",
+        "note": "gait pattern selector; (1, 0) is walking. With (0, 0), (0, 1) or (1, 1) the vendor policy falls in the command script (the other pattern is presumably running)."
+      },
+      {
+        "name": "joint_pos_err",
+        "start": 10,
+        "size": 22,
+        "unit": "rad",
+        "note": "q - default_dof_pos (walk's), not q: with absolute angles the vendor policy falls"
+      },
+      {
+        "name": "joint_vel",
+        "start": 32,
+        "size": 22,
+        "unit": "rad/s"
+      },
+      {
+        "name": "prev_action",
+        "start": 54,
+        "size": 13,
+        "unit": "-",
+        "note": "13 wide: the policy's own action, not the 22 sent to the robot. Verified 2026-10-04 on q1_walkRun_upperPosCtrl v2.1/v3.1/v3.2 (robot software v0.3.0.0.5): the actor outputs 13 (12 legs + waist_roll, by joint order) and the graph concatenates 9 constant zeros to make 22; the other 9 (waist_yaw + 8 arm joints) are position-controlled."
+      },
+      {
+        "name": "cpg",
+        "start": 67,
+        "size": 4,
+        "unit": "-",
+        "note": "(sin 2 pi phi, cos 2 pi phi, -sin 2 pi phi, -cos 2 pi phi): one clock per leg, half a cycle apart. Which leg leads makes no difference to the vendor policy; (cos, sin, ...) and a quarter-cycle offset track worse, all-zero still walks but turns at 0.08 rad/s when asked for 0.6. Cycle time 0.5-0.7 s all work; the runtime picks it (0.25-0.7 s, gait.cycle_time_s) by a law not known yet."
+      }
+    ],
+    "obs_scales": {
+      "dof_pos": 1.0,
+      "dof_vel": 0.05,
+      "lin_vel": 2.0,
+      "ang_vel": 1.0
+    },
+    "clips": {
+      "obs": 18.0,
+      "action": 18.0
+    },
+    "action_scale": 0.5,
+    "command_range": {
+      "vx": [
+        -0.3,
+        0.4
+      ],
+      "vy": [
+        -0.4,
+        0.4
+      ],
+      "wz": [
+        -0.785,
+        0.785
+      ],
+      "deadband": {
+        "vx": 0.1,
+        "vy": 0.1,
+        "wz": 0.1
+      },
+      "accel": {
+        "x": 0.3,
+        "y": 0.3,
+        "yaw": 1.5
+      }
+    },
+    "gait": {
+      "cycle_time_s": [
+        0.25,
+        0.7
+      ],
+      "step_length": 0.6
+    },
+    "joint_vel_lowpass_hz": {
+      "$comment": "100 Hz cutoff for all, except two entries at 10 Hz in the vendor's 14-long list",
+      "default": 100,
+      "exceptions": {
+        "index_9": 10,
+        "index_13": 10
+      }
+    },
+    "policy_action_dim": 13,
+    "history_order": "oldest first, the current frame last (it is also the observations input)",
+    "onnx_inputs": {
+      "observations": 71,
+      "observation_history": 355,
+      "$comment": "history = 5 x 71; the ONNX also embeds an estimator (base velocity 3, latent 16, terrain 16) fed by the history"
+    }
+  },
+  "velocity": {
+    "source": "ours: q1_rl/envs/velocity.py (2026-10-17)",
+    "model_type": null,
+    "recommended": false,
+    "why": "Velocity-command walking for the browser viewer's WASD. NOT a layout the robot's runtime knows -- deploying it needs a runtime of our own. Gains, nominal pose and action scale are mimic_opensource_v2's (gains.yaml), so the viewer can switch between this and the tracking policies on the same actuators.",
+    "obs_dim_valid": 77,
+    "obs_dim_onnx_input": 77,
+    "action_dim": 22,
+    "frame_stack": 1,
+    "fields": [
+      {
+        "name": "command",
+        "start": 0,
+        "size": 3,
+        "unit": "m/s, m/s, rad/s",
+        "note": "operator command: forward and sideways speed in the heading frame, yaw rate"
+      },
+      {
+        "name": "gait",
+        "start": 3,
+        "size": 2,
+        "unit": "-",
+        "note": "sin, cos of the gait clock (period 0.6 s; left foot swings in the first half); (0, 0) when the command is zero"
+      },
+      {
+        "name": "gvec",
+        "start": 5,
+        "size": 3,
+        "unit": "-",
+        "note": "gravity direction in the robot's base frame, from the IMU quaternion"
+      },
+      {
+        "name": "base_ang_vel",
+        "start": 8,
+        "size": 3,
+        "unit": "rad/s",
+        "note": "IMU angular velocity, base frame"
+      },
+      {
+        "name": "joint_pos_err",
+        "start": 11,
+        "size": 22,
+        "unit": "rad",
+        "note": "q - default_dof_pos"
+      },
+      {
+        "name": "joint_vel",
+        "start": 33,
+        "size": 22,
+        "unit": "rad/s",
+        "note": "raw"
+      },
+      {
+        "name": "prev_action",
+        "start": 55,
+        "size": 22,
+        "unit": "-",
+        "note": "raw network output of the previous step"
+      }
+    ],
+    "obs_scales": {
+      "ang_vel": 1.0,
+      "dof_pos": 1.0,
+      "dof_vel": 1.0,
+      "actions": 1.0
+    },
+    "clips": {
+      "obs": 100.0,
+      "action": 100.0
+    },
+    "action_scale": 0.25,
+    "action_meaning": "target_q = default_dof_pos + action_scale * action"
+  }
+}

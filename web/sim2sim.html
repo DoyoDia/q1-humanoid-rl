@@ -1,0 +1,172 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Q1 sim2sim</title>
+<pre id="log">running…</pre>
+<script type="module">
+// Closes the loop: a policy trained by train.py, running in the browser against MuJoCo
+// WASM, through the same contract the training environment used. No rendering here --
+// this page is the headless correctness and speed check; the viewer builds on top of it.
+const log = (s) => { console.log(s); document.getElementById('log').textContent += '\n' + s; };
+window.DONE = false; window.RESULT = null;
+const RUN = new URLSearchParams(location.search).get('run') || 'squat_ppo';
+
+try {
+  const loadMujoco = (await import('./node_modules/@mujoco/mujoco/mujoco.js')).default;
+  const ort = await import('./node_modules/onnxruntime-web/dist/ort.mjs');
+  ort.env.wasm.wasmPaths = new URL('./node_modules/onnxruntime-web/dist/', location).href;
+  ort.env.wasm.numThreads = 1;
+  const { Contract, quatToGravity } = await import('./contract.js');
+  // Bundles are re-exported in place, and http.server lets the browser cache them by heuristic:
+  // revalidate every data file so a fresh export is never shadowed by a stale copy.
+  const get = (u) => fetch(u, { cache: 'no-cache' });
+
+  const base = `./run/${RUN}/`;
+  const [bundle, motion, meta, xml] = await Promise.all([
+    get(base + 'contract.json').then(r => r.json()),
+    get(base + 'motion.json').then(r => r.json()),
+    get(base + 'meta.json').then(r => r.json()),
+    get(base + 'model.xml').then(r => r.text()),
+  ]);
+  const c = new Contract(bundle, meta.contract || 'mimic_opensource_v2');
+  if (!motion.root_quat || !motion.root_pos || motion.cyclic === undefined)
+    throw new Error(`run/${RUN} was bundled by an older export_web_bundle.py -- re-run it`);
+  if (c.frameStack > 1)
+    throw new Error(`run/${RUN} is a ${c.name} policy (5-frame history): check it with tools/check_vendor_walk.py --onnx, ` +
+                    `drive it in sim2sim_view.html`);
+  log(`run ${RUN}  motion=${meta.motion}` + (meta.final ? `  trained ${meta.final.steps.toLocaleString()} steps, ` +
+      `reward ${meta.final.reward.toFixed(2)}, falls ${(100*meta.final.fall_rate).toFixed(1)}%` : "  (no training history)"));
+
+  const mj = await loadMujoco();
+  const model = mj.from_xml_string(xml);
+  const data = new mj.MjData(model);
+  const sess = await ort.InferenceSession.create(new Uint8Array(await get(base + 'policy.onnx').then(r => r.arrayBuffer())), { executionProviders: ['wasm'] });
+  log(`model nq=${model.nq} nu=${model.nu}  contract obs ${c.obsDim}  ${c.policyHz} Hz  dec ${c.decimation}`);
+
+  const key = model.key('stand').id;
+  mj.mj_resetDataKeyframe(model, data, key);
+  mj.mj_forward(model, data);
+
+  const nj = c.nJoints;
+  let prevAction = new Float64Array(nj);
+  let prevTarget = Float64Array.from(c.defaultDofPos);
+  const obsTensor = new ort.Tensor('float32', new Float32Array(c.onnxObsDim), [1, c.onnxObsDim]);
+
+  // A looping clip goes round three times; a one-shot (a routine, a get-up) plays once, as in
+  // training -- looping it would jump the reference from the last pose back to the first.
+  if (c.name === 'velocity') {
+    await walkCheck({ mj, model, data, sess, c, nj, prevAction, prevTarget, obsTensor, quatToGravity });
+    window.DONE = true;
+    throw null;                                   // done: skip the clip check below
+  }
+  const STEPS = motion.n_frames * (motion.cyclic ? 3 : 1);
+  // Falls are judged against the reference, as the training env does: tilt over 60 deg off
+  // the reference's (a clip that bends to the toes pitches the pelvis 90 deg on purpose), or
+  // the pelvis under min(0.22 m, reference - 0.15 m) (a deep squat goes near 0.25 m).
+  let errSum = 0, tiltMax = 0, tiltOffMax = 0, fell = 0; const fellAt = [];
+  const t0 = performance.now();
+  for (let k = 0; k < STEPS; k++) {
+    const ph = k % motion.n_frames;
+    const qpos = data.qpos, qvel = data.qvel;
+    const state = {
+      base_quat: [qpos[3], qpos[4], qpos[5], qpos[6]],
+      base_ang_vel: [qvel[3], qvel[4], qvel[5]],
+      joint_pos: Array.from({ length: nj }, (_, i) => qpos[7 + i]),
+      joint_vel: Array.from({ length: nj }, (_, i) => qvel[6 + i]),
+      prev_action: prevAction,
+      motion_ref_pos: motion.joint_pos[ph],
+      motion_ref_vel: motion.joint_vel[ph],
+      motion_ref_quat: motion.root_quat[ph],
+    };
+    obsTensor.data.set(c.padForOnnx(c.buildObs(state)));   // runtime width, tail zero
+    const action = (await sess.run({ obs: obsTensor })).action.data;
+    const target = c.actionToTarget(action, prevTarget);
+    for (let i = 0; i < nj; i++) data.ctrl[i] = target[i];
+    for (let i = 0; i < c.decimation; i++) mj.mj_step(model, data);
+    prevAction = action; prevTarget = target;
+
+    let e = 0;
+    for (let i = 0; i < nj; i++) { const d = qpos[7 + i] - motion.joint_pos[ph][i]; e += d * d; }
+    errSum += Math.sqrt(e / nj);
+    const g = quatToGravity([qpos[3], qpos[4], qpos[5], qpos[6]]);
+    tiltMax = Math.max(tiltMax, Math.acos(Math.min(1, Math.max(-1, -g[2]))) * 180 / Math.PI);
+    const gr = quatToGravity(motion.root_quat[ph]);
+    const dot = g[0] * gr[0] + g[1] * gr[1] + g[2] * gr[2];
+    tiltOffMax = Math.max(tiltOffMax, Math.acos(Math.min(1, Math.max(-1, dot))) * 180 / Math.PI);
+    const floor = Math.min(0.22, motion.root_pos[ph][2] - 0.15);
+    if (qpos[2] < floor) { fell++; if (fellAt.length < 5) fellAt.push(k); }
+  }
+  const wall = (performance.now() - t0) / 1000;
+  const simSeconds = STEPS / c.policyHz;
+
+  log('');
+  log(`ran ${STEPS} policy steps = ${simSeconds.toFixed(1)} s of sim in ${wall.toFixed(2)} s wall`);
+  log(`realtime factor      ${(simSeconds / wall).toFixed(1)}x`);
+  log(`joint tracking RMSE  ${(errSum / STEPS).toFixed(4)} rad`);
+  log(`max tilt             ${tiltMax.toFixed(1)} deg   (off the reference's tilt by at most ${tiltOffMax.toFixed(1)} deg)`);
+  log(`final base height    ${data.qpos[2].toFixed(4)} m   (below the fall floor on ${fell} steps)`);
+  if (fell) log(`first falls at step  ${fellAt.map(k => `${k} (${(k / c.policyHz).toFixed(1)} s, frame ${k % motion.n_frames})`).join(', ')}`);
+  log('');
+  log(`clip                 ${motion.cyclic ? 'cyclic, 3 loops' : 'one-shot, played once'}`);
+  log(fell === 0 && tiltOffMax < 60 ? 'PASS  the policy tracks the clip in the browser'
+                                 : 'FAIL  the policy falls in the browser');
+  window.RESULT = { realtime: simSeconds / wall, rmse: errSum / STEPS, tiltMax, tiltOffMax, fell };
+} catch (e) { if (e !== null) log('ERROR ' + (e && e.stack || e)); }
+window.DONE = true;
+
+// A walking policy (train.py --task velocity) has no clip: drive it through a fixed command
+// script instead and compare the base velocity it achieves (heading frame) with each command.
+async function walkCheck({ mj, model, data, sess, c, nj, prevAction, prevTarget, obsTensor, quatToGravity }) {
+  const SCRIPT = [                                 // seconds, [vx m/s, vy m/s, yaw rate rad/s]
+    ['站着', 2, [0, 0, 0]], ['前进', 5, [0.3, 0, 0]], ['左转', 4, [0, 0, 0.6]], ['右转', 4, [0, 0, -0.6]],
+    ['左移', 4, [0, 0.25, 0]], ['后退', 4, [-0.2, 0, 0]], ['边走边转', 5, [0.3, 0, 0.4]], ['停下', 3, [0, 0, 0]]];
+  const GAIT_PERIOD = 0.6, HZ = c.policyHz;
+  let clock = 0, fell = 0, sqV = 0, sqW = 0, nErr = 0;
+  const t0 = performance.now();
+  log('');
+  log('segment        cmd vx  vy    wz   |  got vx  vy    wz   (mean over the segment after its first second)');
+  for (const [name, secs, cmd] of SCRIPT) {
+    const moving = cmd.some((x) => x !== 0);
+    const acc = [0, 0, 0]; let n = 0;
+    for (let k = 0; k < secs * HZ; k++) {
+      const q = data.qpos, v = data.qvel;
+      const a = 2 * Math.PI * clock;
+      const obs = c.buildObs({ base_quat: [q[3], q[4], q[5], q[6]], base_ang_vel: [v[3], v[4], v[5]],
+        joint_pos: Array.from({ length: nj }, (_, i) => q[7 + i]), joint_vel: Array.from({ length: nj }, (_, i) => v[6 + i]),
+        prev_action: prevAction, command: cmd, gait: moving ? [Math.sin(a), Math.cos(a)] : [0, 0] });
+      obsTensor.data.set(c.padForOnnx(obs));
+      const action = (await sess.run({ obs: obsTensor })).action.data;
+      const target = c.actionToTarget(action, prevTarget);
+      for (let i = 0; i < nj; i++) data.ctrl[i] = target[i];
+      for (let i = 0; i < c.decimation; i++) mj.mj_step(model, data);
+      prevAction = action; prevTarget = target;
+      clock = (clock + 1 / (GAIT_PERIOD * HZ)) % 1;
+      const qw = [q[3], q[4], q[5], q[6]];
+      const yaw = Math.atan2(2 * (qw[0] * qw[3] + qw[1] * qw[2]), 1 - 2 * (qw[2] * qw[2] + qw[3] * qw[3]));
+      const vx = Math.cos(yaw) * v[0] + Math.sin(yaw) * v[1], vy = -Math.sin(yaw) * v[0] + Math.cos(yaw) * v[1];
+      // yaw rate in the world: the body-frame angular velocity rotated, its z
+      const [w, x, y, z] = qw, wb = [v[3], v[4], v[5]];
+      const wz = 2 * (x * z - w * y) * wb[0] + 2 * (y * z + w * x) * wb[1] + (1 - 2 * (x * x + y * y)) * wb[2];
+      if (k >= HZ) {
+        acc[0] += vx; acc[1] += vy; acc[2] += wz; n++;
+        sqV += (vx - cmd[0]) ** 2 + (vy - cmd[1]) ** 2; sqW += (wz - cmd[2]) ** 2; nErr++;
+      }
+      const g = quatToGravity(qw);
+      if (Math.acos(Math.max(-1, Math.min(1, -g[2]))) > Math.PI / 3 || q[2] < 0.22) fell++;
+    }
+    const m = acc.map((x) => x / Math.max(1, n));
+    const f = (x) => (x >= 0 ? ' ' : '') + x.toFixed(2);
+    log(`${name.padEnd(4, '　')}  ${f(cmd[0])} ${f(cmd[1])} ${f(cmd[2])}  |  ${f(m[0])} ${f(m[1])} ${f(m[2])}`);
+  }
+  const total = SCRIPT.reduce((s, x) => s + x[1], 0), wall = (performance.now() - t0) / 1000;
+  const eV = Math.sqrt(sqV / nErr), eW = Math.sqrt(sqW / nErr);
+  log('');
+  log(`ran ${total} s of sim in ${wall.toFixed(2)} s wall  (${(total / wall).toFixed(1)}x realtime)`);
+  log(`velocity error RMS   ${eV.toFixed(3)} m/s    yaw rate error RMS ${eW.toFixed(3)} rad/s`);
+  log(`fell on ${fell} steps`);
+  log('');
+  const ok = fell === 0 && eV < 0.12 && eW < 0.3;
+  log(ok ? 'PASS  the walking policy follows the commands in the browser'
+         : 'FAIL  ' + (fell ? 'the policy falls' : 'the policy does not follow the commands closely enough'));
+  window.RESULT = { realtime: total / wall, velErr: eV, yawErr: eW, fell };
+}
+</script>

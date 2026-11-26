@@ -1,0 +1,555 @@
+{
+ "_generated_by": "tools/export_contract_json.py -- do not edit; edit the YAML sources",
+ "_source_hash": "5b1341539df2120d",
+ "_sources": [
+  "joints.yaml",
+  "gains.yaml",
+  "rates.yaml",
+  "obs_spec.json"
+ ],
+ "n_joints": 22,
+ "joint_names": [
+  "left_hip_pitch_joint",
+  "left_hip_roll_joint",
+  "left_hip_yaw_joint",
+  "left_knee_joint",
+  "left_ankle_pitch_joint",
+  "left_ankle_roll_joint",
+  "right_hip_pitch_joint",
+  "right_hip_roll_joint",
+  "right_hip_yaw_joint",
+  "right_knee_joint",
+  "right_ankle_pitch_joint",
+  "right_ankle_roll_joint",
+  "waist_roll_joint",
+  "waist_yaw_joint",
+  "left_shoulder_pitch_joint",
+  "left_shoulder_roll_joint",
+  "left_shoulder_yaw_joint",
+  "left_elbow_joint",
+  "right_shoulder_pitch_joint",
+  "right_shoulder_roll_joint",
+  "right_shoulder_yaw_joint",
+  "right_elbow_joint"
+ ],
+ "lower": [
+  -3.0543,
+  -0.69813,
+  -1.5708,
+  0,
+  -0.7854,
+  -0.34907,
+  -3.0543,
+  -1.5708,
+  -1.5708,
+  0,
+  -0.7854,
+  -0.34907,
+  -0.2618,
+  -1.5708,
+  -3.1416,
+  -0.087266,
+  -1.5708,
+  -0.87266,
+  -3.1416,
+  -2.7925,
+  -1.5708,
+  -0.87266
+ ],
+ "upper": [
+  1.5708,
+  1.5708,
+  1.5708,
+  2.4435,
+  0.43633,
+  0.34907,
+  1.5708,
+  0.69813,
+  1.5708,
+  2.4435,
+  0.43633,
+  0.34907,
+  0.2618,
+  1.5708,
+  1.5708,
+  2.7925,
+  1.5708,
+  1.6581,
+  1.5708,
+  0.087266,
+  1.5708,
+  1.6581
+ ],
+ "effort": [
+  33,
+  33,
+  33,
+  33,
+  22,
+  22,
+  33,
+  33,
+  33,
+  33,
+  22,
+  22,
+  33,
+  33,
+  22,
+  14,
+  22,
+  22,
+  22,
+  14,
+  22,
+  22
+ ],
+ "velocity": [
+  20.94,
+  20.94,
+  20.94,
+  20.94,
+  20.94,
+  20.94,
+  20.94,
+  20.94,
+  20.94,
+  20.94,
+  20.94,
+  20.94,
+  20.94,
+  20.94,
+  20.94,
+  27.23,
+  20.94,
+  20.94,
+  20.94,
+  27.23,
+  20.94,
+  20.94
+ ],
+ "command": {
+  "max_step_rad": 0.2,
+  "publish_hz": [
+   500,
+   1000
+  ],
+  "stamp": "monotonic onboard clock; out-of-order frames are dropped silently",
+  "shutdown_frame": {
+   "stiffness": 0.0,
+   "damping": 5.0
+  }
+ },
+ "rates": {
+  "policy_hz": 50,
+  "sim": {
+   "timestep": 0.001,
+   "decimation": 20
+  },
+  "robot": {
+   "joint_command_hz": 1000,
+   "joint_state_hz": 500,
+   "imu_hz": "unknown",
+   "mc_common_state_hz": 10
+  },
+  "timeouts": {
+   "imu_ms": 10,
+   "joint_ms": 10,
+   "cmd_expiration_ms": 200
+  },
+  "fall_guard": {
+   "fall_delta_threshold_deg": 35.0,
+   "fall_delta_soft_threshold_deg": 48.0,
+   "gyro_norm_threshold_rad_s": 6.0,
+   "gyro_fall_count_threshold": 3,
+   "stand_arm_delta_deg": 45.0
+  }
+ },
+ "contracts": {
+  "mimic_opensource_v2": {
+   "obs_dim": 119,
+   "onnx_obs_dim": 119,
+   "frame_stack": 1,
+   "policy_action_dim": 22,
+   "fields": [
+    {
+     "name": "motion_ref_pos",
+     "start": 0,
+     "size": 22
+    },
+    {
+     "name": "motion_ref_vel",
+     "start": 22,
+     "size": 22
+    },
+    {
+     "name": "ref_gravity",
+     "start": 44,
+     "size": 3
+    },
+    {
+     "name": "gvec",
+     "start": 47,
+     "size": 3
+    },
+    {
+     "name": "base_ang_vel",
+     "start": 50,
+     "size": 3
+    },
+    {
+     "name": "joint_pos_err",
+     "start": 53,
+     "size": 22
+    },
+    {
+     "name": "joint_vel",
+     "start": 75,
+     "size": 22
+    },
+    {
+     "name": "prev_action",
+     "start": 97,
+     "size": 22
+    }
+   ],
+   "obs_scales": {
+    "ang_vel": 1.0,
+    "dof_pos": 1.0,
+    "dof_vel": 1.0,
+    "actions": 1.0
+   },
+   "obs_clip": 100.0,
+   "action_clip": 100.0,
+   "action_scale": 0.25,
+   "kps": [
+    30.0,
+    30.0,
+    30.0,
+    30.0,
+    20.0,
+    20.0,
+    30.0,
+    30.0,
+    30.0,
+    30.0,
+    20.0,
+    20.0,
+    80.0,
+    30.0,
+    20.0,
+    20.0,
+    20.0,
+    20.0,
+    20.0,
+    20.0,
+    20.0,
+    20.0
+   ],
+   "kds": [
+    1.5,
+    1.5,
+    1.5,
+    1.5,
+    1.5,
+    1.5,
+    1.5,
+    1.5,
+    1.5,
+    1.5,
+    1.5,
+    1.5,
+    3.5,
+    1.5,
+    1.5,
+    1.5,
+    1.5,
+    1.5,
+    1.5,
+    1.5,
+    1.5,
+    1.5
+   ],
+   "default_dof_pos": [
+    -0.09,
+    -0.02,
+    -0.02,
+    0.22,
+    -0.13,
+    0.0,
+    -0.09,
+    0.02,
+    0.02,
+    0.22,
+    -0.13,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.18,
+    0.0,
+    1.4,
+    0.0,
+    -0.18,
+    0.0,
+    1.4
+   ],
+   "unverified": null
+  },
+  "walk": {
+   "obs_dim": 71,
+   "onnx_obs_dim": 71,
+   "frame_stack": 5,
+   "policy_action_dim": 13,
+   "fields": [
+    {
+     "name": "imu_ang_vel",
+     "start": 0,
+     "size": 3
+    },
+    {
+     "name": "imu_euler",
+     "start": 3,
+     "size": 2
+    },
+    {
+     "name": "command",
+     "start": 5,
+     "size": 3
+    },
+    {
+     "name": "pattern",
+     "start": 8,
+     "size": 2
+    },
+    {
+     "name": "joint_pos_err",
+     "start": 10,
+     "size": 22
+    },
+    {
+     "name": "joint_vel",
+     "start": 32,
+     "size": 22
+    },
+    {
+     "name": "prev_action",
+     "start": 54,
+     "size": 13
+    },
+    {
+     "name": "cpg",
+     "start": 67,
+     "size": 4
+    }
+   ],
+   "obs_scales": {
+    "dof_pos": 1.0,
+    "dof_vel": 0.05,
+    "lin_vel": 2.0,
+    "ang_vel": 1.0
+   },
+   "obs_clip": 18.0,
+   "action_clip": 18.0,
+   "action_scale": 0.5,
+   "kps": [
+    40.0,
+    40.0,
+    40.0,
+    40.0,
+    20.0,
+    10.0,
+    40.0,
+    40.0,
+    40.0,
+    40.0,
+    20.0,
+    10.0,
+    80.0,
+    30.0,
+    5.0,
+    5.0,
+    5.0,
+    3.0,
+    5.0,
+    5.0,
+    5.0,
+    3.0
+   ],
+   "kds": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    2.0,
+    1.5,
+    0.5,
+    0.5,
+    0.5,
+    0.5,
+    0.5,
+    0.5,
+    0.5,
+    0.5
+   ],
+   "default_dof_pos": [
+    -0.34,
+    -0.1005,
+    -0.1143,
+    0.6982,
+    -0.3582,
+    0.082,
+    -0.34,
+    0.1005,
+    0.1143,
+    0.6982,
+    -0.3582,
+    -0.082,
+    0.0,
+    0.0,
+    0.0,
+    0.25,
+    0.0,
+    1.0,
+    0.0,
+    -0.25,
+    0.0,
+    1.0
+   ],
+   "unverified": null
+  },
+  "velocity": {
+   "obs_dim": 77,
+   "onnx_obs_dim": 77,
+   "frame_stack": 1,
+   "policy_action_dim": 22,
+   "fields": [
+    {
+     "name": "command",
+     "start": 0,
+     "size": 3
+    },
+    {
+     "name": "gait",
+     "start": 3,
+     "size": 2
+    },
+    {
+     "name": "gvec",
+     "start": 5,
+     "size": 3
+    },
+    {
+     "name": "base_ang_vel",
+     "start": 8,
+     "size": 3
+    },
+    {
+     "name": "joint_pos_err",
+     "start": 11,
+     "size": 22
+    },
+    {
+     "name": "joint_vel",
+     "start": 33,
+     "size": 22
+    },
+    {
+     "name": "prev_action",
+     "start": 55,
+     "size": 22
+    }
+   ],
+   "obs_scales": {
+    "ang_vel": 1.0,
+    "dof_pos": 1.0,
+    "dof_vel": 1.0,
+    "actions": 1.0
+   },
+   "obs_clip": 100.0,
+   "action_clip": 100.0,
+   "action_scale": 0.25,
+   "kps": [
+    30.0,
+    30.0,
+    30.0,
+    30.0,
+    20.0,
+    20.0,
+    30.0,
+    30.0,
+    30.0,
+    30.0,
+    20.0,
+    20.0,
+    80.0,
+    30.0,
+    20.0,
+    20.0,
+    20.0,
+    20.0,
+    20.0,
+    20.0,
+    20.0,
+    20.0
+   ],
+   "kds": [
+    1.5,
+    1.5,
+    1.5,
+    1.5,
+    1.5,
+    1.5,
+    1.5,
+    1.5,
+    1.5,
+    1.5,
+    1.5,
+    1.5,
+    3.5,
+    1.5,
+    1.5,
+    1.5,
+    1.5,
+    1.5,
+    1.5,
+    1.5,
+    1.5,
+    1.5
+   ],
+   "default_dof_pos": [
+    -0.09,
+    -0.02,
+    -0.02,
+    0.22,
+    -0.13,
+    0.0,
+    -0.09,
+    0.02,
+    0.02,
+    0.22,
+    -0.13,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.18,
+    0.0,
+    1.4,
+    0.0,
+    -0.18,
+    0.0,
+    1.4
+   ],
+   "unverified": null
+  }
+ }
+}

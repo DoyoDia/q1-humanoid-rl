@@ -1,0 +1,22 @@
+# The q1_rl motion page (q1rl_web.py), started on boot. install_web.sh fills in @DST@ and
+# @USER@ and installs it as /etc/systemd/system/q1rl-web.service.
+[Unit]
+Description=q1_rl motion page on :8090 (deploy/robot/web)
+# the vendor stack (em.service) brings up motion control, aimdk_msgs and the ROS graph
+After=em.service network-online.target
+Wants=em.service network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+Group=@USER@
+Environment=HOME=@HOME@
+# run.sh waits 20 s for mc, then keeps q1rl_web.py running
+ExecStart=@DST@/run.sh
+Restart=always
+RestartSec=5
+# leave the CPU to motion control and the other nodes
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

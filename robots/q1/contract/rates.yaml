@@ -1,0 +1,32 @@
+# Control-loop rates. Measured / read from the robot on 2026-09-19.
+# Matching these in training is not optional: a policy trained at a different
+# decimation will not transfer.
+
+policy_hz: 50               # dt = 0.02 in all 13 q1_t0d0/rl/*.yaml files that have a dt line.
+                            # Five carry a "# 100Hz" comment (wrong), eight "# 50Hz".
+                            # Two carry the correct one:
+                            #   "# 50Hz policy, same as sim2sim decimation 20 * 0.001s."
+
+sim:
+  timestep: 0.001           # MuJoCo dt, matches q1_v3_mc.xml <option timestep="0.001"/>
+  decimation: 20            # 0.001 * 20 = 0.02 s = 50 Hz
+
+robot:
+  joint_command_hz: 1000    # mc_Q1.yaml PublisherManager.joint_command.frequency
+                            # executor rt_joint_pub, SCHED_RR:80, pinned to CPU 5
+  joint_state_hz: 500       # SDK 接口说明.md (v4, 2026-10-10)
+  imu_hz: unknown           # /aima/hal/imu/state is iceoryx-only; not measurable over ROS 2
+  mc_common_state_hz: 10
+
+timeouts:                   # security_guard.yaml data_timeout_guard -- hard limits
+  imu_ms: 10
+  joint_ms: 10
+  cmd_expiration_ms: 200    # cmd_guard.expiration_time_ms
+  # 10 ms is why the policy cannot live on an external PC over WiFi/DDS.
+
+fall_guard:                 # security_guard.yaml body_posture_guard
+  fall_delta_threshold_deg: 35.0
+  fall_delta_soft_threshold_deg: 48.0
+  gyro_norm_threshold_rad_s: 6.0
+  gyro_fall_count_threshold: 3
+  stand_arm_delta_deg: 45.0

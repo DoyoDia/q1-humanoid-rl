@@ -1,0 +1,573 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Q1 sim2sim</title>
+<style>
+  :root { --bg:#0b0d10; --panel:rgba(20,23,28,.88); --line:#2b3038; --fg:#e8eaed; --dim:#9aa0a6;
+          --accent:#4c8dff; --ok:#34c759; --bad:#ff453a; --warn:#ffb340; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--fg); overflow:hidden;
+               font:14px/1.45 -apple-system, "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; }
+  canvas { display:block; touch-action:none; }
+  [hidden] { display:none !important; }
+  #hud { position:fixed; left:16px; top:16px; width:380px; max-width:calc(100vw - 32px); max-height:calc(100vh - 32px);
+         overflow:auto; box-sizing:border-box; background:var(--panel); border:1px solid var(--line);
+         border-radius:12px; padding:12px 14px; backdrop-filter:blur(6px); }
+  #hud.min > :not(header) { display:none; }
+  header { display:flex; align-items:center; gap:8px; }
+  header h1 { font-size:16px; margin:0; flex:1; }
+  #fold { padding:2px 9px; }
+  .sub { color:var(--dim); font-size:12px; margin:2px 0 6px; }
+  .lbl { color:var(--dim); font-size:12px; white-space:nowrap; }
+  h2 { font-size:12px; color:var(--dim); font-weight:600; margin:10px 0 4px; letter-spacing:.04em; }
+  .row { display:flex; gap:6px; align-items:center; margin:6px 0; flex-wrap:wrap; }
+  button, select { font:inherit; color:var(--fg); background:#1c2027; border:1px solid var(--line); border-radius:8px;
+                   padding:5px 11px; cursor:pointer; }
+  select { max-width:100%; }
+  button.on { border-color:var(--accent); color:var(--accent); }
+  button.act.on { background:var(--accent); color:#fff; }
+  button:disabled { opacity:.4; cursor:default; }
+  button kbd { color:var(--dim); font:11px ui-monospace, monospace; margin-left:4px; }
+  input[type=range] { flex:1; min-width:80px; accent-color:var(--accent); }
+  #pad { display:grid; grid-template-columns:repeat(3, 1fr); }
+  #pad button { padding:5px 4px; touch-action:none; user-select:none; }
+  #pad button.on { background:var(--accent); color:#fff; }
+  .stats { display:grid; grid-template-columns:auto 1fr; gap:1px 12px; font-variant-numeric:tabular-nums; margin-top:8px; }
+  .stats span:nth-child(odd) { color:var(--dim); }
+  #status { margin-top:6px; font-weight:600; min-height:1.4em; }
+  #status.ok { color:var(--ok); } #status.bad { color:var(--bad); } #status.warn { color:var(--warn); }
+  #legend { position:fixed; right:16px; bottom:16px; max-width:calc(100vw - 32px); color:var(--dim); font-size:12px;
+            background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:8px 12px; }
+  #loading { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; color:var(--dim); font-size:15px; }
+  #force { position:fixed; pointer-events:none; background:var(--panel); border:1px solid #ff6b3d; color:#ffb199;
+           border-radius:8px; padding:2px 8px; font:600 13px/1.4 ui-monospace, monospace; white-space:nowrap; }
+  #force.cap { border-color:var(--bad); color:var(--bad); }
+  #toast { position:fixed; left:50%; top:16px; transform:translateX(-50%); background:var(--panel); border:1px solid var(--line);
+           border-radius:10px; padding:6px 14px; opacity:0; transition:opacity .3s; pointer-events:none; }
+  @media (max-width: 640px) { #legend { display:none; } #hud { width:auto; right:16px; } }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "./node_modules/three/build/three.module.js",
+  "three/addons/": "./node_modules/three/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="loading">加载中…</div>
+<div id="toast"></div>
+<div id="force" hidden></div>
+<div id="hud" hidden>
+  <header><h1>Q1 实时 sim2sim</h1><button id="fold" title="收起/展开">–</button></header>
+  <div class="sub">部署用的 ONNX 每 20 ms 在浏览器里推理一次，MuJoCo WASM 实时仿真（在 Web Worker 里）；可以走、推、拖、抱、扔球</div>
+
+  <h2>场景</h2>
+  <div class="row">
+    <select id="scene"></select>
+    <select id="spawn"></select>
+    <button id="reset">复位<kbd>R</kbd></button>
+  </div>
+
+  <h2>动作</h2>
+  <div class="row" id="actions"></div>
+  <div class="row" id="seekrow" hidden><input type="range" id="seek" min="0" max="1" step="1" value="0"><span id="t">0:00</span></div>
+
+  <h2>走路 <span class="sub" style="font-weight:400">按住 W/S 前后、A/D 转向、Q/E 横移，松开后站稳</span></h2>
+  <div class="row" id="pad">
+    <button data-k="q">↖ 左移<kbd>Q</kbd></button><button data-k="w">↑ 前进<kbd>W</kbd></button><button data-k="e">右移 ↗<kbd>E</kbd></button>
+    <button data-k="a">↺ 左转<kbd>A</kbd></button><button data-k="s">↓ 后退<kbd>S</kbd></button><button data-k="d">右转 ↻<kbd>D</kbd></button>
+  </div>
+  <div class="row">
+    <span class="lbl">前进速度</span>
+    <input type="range" id="walkv" min="0.1" max="0.4" step="0.05" value="0.35" title="按住 W 时的前进速度（上限是走路策略训练过的最大速度）"><span id="walkvl">0.35 m/s</span>
+  </div>
+
+  <h2>干扰</h2>
+  <div class="row">
+    <button id="push">推一下<kbd>空格</kbd></button>
+    <span class="lbl">力度</span>
+    <input type="range" id="pushv" min="0.2" max="1.5" step="0.1" value="0.5" title="推的力度：推完瞬间机器人获得的速度"><span id="pushvl">0.5 m/s</span>
+  </div>
+  <div class="row">
+    <button id="lift">抱起来<kbd>L</kbd></button>
+    <button id="ball">扔球<kbd>B</kbd></button>
+    <button id="noise" class="on" title="和真机一样：IMU/编码器噪声、IMU 安装偏差、0～10 ms 控制延迟、0～2 ms 观测延迟">噪声+延迟</button>
+  </div>
+
+  <h2>显示</h2>
+  <div class="row">
+    <button id="pause">暂停<kbd>P</kbd></button>
+    <select id="speed"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option></select>
+    <button id="ghost" class="on">参考动作</button>
+    <button id="align" class="on">朝向对齐</button>
+    <button id="follow" class="on">镜头跟随</button>
+    <button id="music" class="on">♪ 音乐</button>
+  </div>
+
+  <div class="stats">
+    <span>策略</span><span id="pol">–</span>
+    <span>关节误差</span><span id="rmse">–</span>
+    <span>朝向偏差</span><span id="yaw">–</span>
+    <span>骨盆高度</span><span id="h">–</span>
+    <span>速度指令</span><span id="cmd">–</span>
+    <span>实际速度</span><span id="vel">–</span>
+    <span>实时率</span><span id="rt">–</span>
+  </div>
+  <div id="status"></div>
+</div>
+<div id="legend" hidden>WASD 走路 · Q/E 横移 · 左键拖机器人或物体：用手拉它 · 拖空白处：转视角 · 右键平移 · 滚轮缩放 · 方向键：从镜头方向推 · 空格 推一下 · L 抱起/放下 · B 扔球 · R 复位 · P 暂停</div>
+
+<script type="module">
+// The deployment policies in a live MuJoCo world: always running, the user walking it around,
+// pushing, dragging, lifting and throwing things at it, in a few scenes (web/scenes.js).
+//
+// The simulation -- physics, policies, noise and latency, the hands, falls -- runs in a Web
+// Worker (web/sim_worker.js) on its own clock, so a slow frame never stalls the robot and the
+// physics never stalls the page. This side draws: it keeps a copy of the same model, takes
+// each state the worker sends (qpos), runs kinematics on it and poses the meshes.
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { SCENES, sceneXml, textures } from './scenes.js';
+
+const $ = (id) => document.getElementById(id);
+const params = new URLSearchParams(location.search);
+const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+const toast = (s) => { const t = $('toast'); t.textContent = s; t.style.opacity = 1; clearTimeout(toast.h); toast.h = setTimeout(() => t.style.opacity = 0, 1600); };
+// WASD: the command each key asks for (vx m/s, vy m/s, yaw rate rad/s), inside what the walking
+// policy was trained on (q1_rl/envs/velocity.py: vx -0.3..0.4, vy +-0.4, yaw +-0.785). W's speed
+// is the 前进速度 slider's instead.
+const KEYS = { w: [0.35, 0, 0], s: [-0.25, 0, 0], a: [0, 0, 0.6], d: [0, 0, -0.6], q: [0, 0.25, 0], e: [0, -0.25, 0] };
+const fail = (e) => { const l = $('loading'); if (l) l.textContent = '出错：' + (e && e.message || e);
+                      else { $('status').textContent = '出错：' + (e && e.message || e); $('status').className = 'bad'; } console.error(e); };
+
+try {
+  const worker = new Worker(new URL('./sim_worker.js', import.meta.url), { type: 'module' });
+  worker.onerror = (e) => fail(e.message || e);
+  const send = (m) => worker.postMessage(m);
+  let ready, readyRes;
+  ready = new Promise((r) => readyRes = r);
+  let S = null;                                   // the latest state from the worker
+  const acks = {}; let ackId = 0;
+  const audios = {};                              // run -> Audio
+  worker.onmessage = (e) => {
+    const m = e.data;
+    if (m.t === 'ready') readyRes(m);
+    else if (m.t === 'state') onState(m);
+    else if (m.t === 'scene') onScene(m.id);
+    else if (m.t === 'status') setStatus(m.text, m.cls);
+    else if (m.t === 'toast') toast(m.text);
+    else if (m.t === 'ack') { if (m.audio && !audios[m.run]) audios[m.run] = new Audio(m.audio); acks[m.id]?.(m.ok); delete acks[m.id]; }
+    else if (m.t === 'error') fail(m.message);
+  };
+  const get = (u) => fetch(u, { cache: 'no-cache' });
+  const loadMujoco = (await import('./node_modules/@mujoco/mujoco/mujoco.js')).default;
+  const [vis, bin, mj] = await Promise.all([
+    get('./assets/q1_visual.json').then(r => r.json()),
+    get('./assets/q1_visual.bin').then(r => r.arrayBuffer()),
+    loadMujoco(),
+  ]);
+  send({ t: 'init', scene: params.get('scene') || 'open', run: params.get('run'), walk: params.get('walk') });
+  const info = await ready;
+  const xmlBase = info.xmlBase, clips = info.clips, HZ = info.hz;
+
+  // -- renderer, shared by all scenes --------------------------------------------------------
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  document.body.appendChild(renderer.domElement);
+  const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.02, 120);
+  camera.up.set(0, 0, 1);
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  const TEX = textures();
+  function tex(name, sx = 1, sy = 1) {
+    const t = TEX[name]; if (!t) return null;
+    const k = new THREE.CanvasTexture(t.canvas);
+    k.colorSpace = THREE.SRGBColorSpace;
+    k.wrapS = k.wrapT = THREE.RepeatWrapping;
+    k.anisotropy = 8;
+    if (!t.stretch) k.repeat.set(sx / t.metres, sy / t.metres);
+    return k;
+  }
+  const rgba = (s) => s.split(' ').map(Number);
+
+  // robot meshes, from the visual model (tools/export_web_visual.py)
+  const geomCache = vis.meshes.map((m) => {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(bin, m.vert_offset, m.n_vert * 3), 3));
+    g.setIndex(new THREE.BufferAttribute(new Uint32Array(bin, m.face_offset, m.n_face * 3), 1));
+    g.computeVertexNormals();
+    return g;
+  });
+  const mq = (q) => new THREE.Quaternion(q[1], q[2], q[3], q[0]);    // MuJoCo w x y z -> three x y z w
+
+  // -- world: one per scene (the model for drawing, its data, three scene) -------------------
+  let W = null;
+  function buildWorld(scene) {
+    const model = mj.from_xml_string(sceneXml(xmlBase, scene));
+    const data = new mj.MjData(model), ghostData = new mj.MjData(model);
+    mj.mj_resetData(model, data);
+    mj.mj_kinematics(model, data);
+    const s3 = new THREE.Scene();
+    s3.background = new THREE.Color(scene.sky);
+    s3.fog = new THREE.Fog(scene.sky, 9, 26);
+    s3.add(new THREE.HemisphereLight(0xffffff, 0x445566, scene.dark ? 0.7 : 1.1));
+    const sun = new THREE.DirectionalLight(0xffffff, scene.dark ? 1.1 : 1.6);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.bias = -0.0004;
+    Object.assign(sun.shadow.camera, { left: -4, right: 4, top: 4, bottom: -4, near: 0.5, far: 20 });
+    s3.add(sun, sun.target);
+    if (scene.dark) {                                          // stage lights
+      for (const x of [-2, 0, 2]) {
+        const sp = new THREE.SpotLight(0xfff2dd, 14, 12, 0.5, 0.5, 1.2);
+        sp.position.set(x, -2.5, 4.5); sp.target.position.set(x * 0.6, 1.3, 0.45);
+        s3.add(sp, sp.target);
+      }
+    }
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(80, 80),
+      new THREE.MeshStandardMaterial({ map: tex(scene.floor.tex, 80, 80), roughness: 0.85 }));
+    floor.receiveShadow = true;
+    s3.add(floor);
+
+    const pelvis = model.body('pelvis').id;
+    const robotBodies = [];
+    for (let b = 0; b < model.nbody; b++) if (model.body_rootid[b] === pelvis) robotBodies.push(b);
+    // scene geoms, drawn from the compiled model (sizes and poses as the physics has them)
+    const look = scene.builder.look, sceneMeshes = [], dynamic = [], walls = [];
+    for (let g = 0; g < model.ngeom; g++) {
+      const b = model.geom_bodyid[g];
+      if (model.body_rootid[b] === pelvis) continue;
+      const type = model.geom_type[g], sz = [model.geom_size[3 * g], model.geom_size[3 * g + 1], model.geom_size[3 * g + 2]];
+      let geo;
+      if (type === 6) geo = new THREE.BoxGeometry(2 * sz[0], 2 * sz[1], 2 * sz[2]);
+      else if (type === 5) { geo = new THREE.CylinderGeometry(sz[0], sz[0], 2 * sz[1], 32); geo.rotateX(Math.PI / 2); }
+      else if (type === 2) geo = new THREE.SphereGeometry(sz[0], 32, 16);
+      else continue;                                           // the floor plane is drawn above
+      const name = model.geom(g).name, L = look[name] || {};
+      const col = rgba(L.rgba || '0.7 0.7 0.7 1');
+      const colour = new THREE.Color().setRGB(col[0], col[1], col[2], THREE.SRGBColorSpace);
+      const span = type === 6 ? [2 * Math.max(sz[0], sz[2]), 2 * Math.max(sz[1], sz[2])] : [1, 1];
+      const map = L.tex ? tex(L.tex, span[0], span[1]) : null;
+      const mat = new THREE.MeshStandardMaterial({
+        color: map && !TEX[L.tex].tint ? new THREE.Color(0xffffff).lerp(colour, 0.25) : colour, roughness: L.rough ?? 0.7, metalness: L.metal ?? 0,
+        map, transparent: !!L.wall });
+      if (L.glow) { mat.emissive = new THREE.Color(0xffffff); mat.emissiveIntensity = 0.45; if (map) mat.emissiveMap = map; }
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.castShadow = !L.wall; mesh.receiveShadow = true;
+      mesh.matrixAutoUpdate = false;
+      mesh.userData = { geom: g, body: b, dynamic: model.body_jntnum[b] > 0 };
+      if (L.wall) walls.push({ mesh, normal: new THREE.Vector3(...L.normal),
+                               centre: new THREE.Vector3(data.geom_xpos[3 * g], data.geom_xpos[3 * g + 1], data.geom_xpos[3 * g + 2]) });
+      s3.add(mesh);
+      sceneMeshes.push(mesh);
+      if (mesh.userData.dynamic) dynamic.push(mesh);
+    }
+    function makeRobot(material) {
+      const groups = Array.from({ length: model.nbody }, () => new THREE.Group());
+      for (const gv of vis.geoms) {
+        const mat = material || new THREE.MeshStandardMaterial({
+          color: new THREE.Color(gv.rgba[0], gv.rgba[1], gv.rgba[2]), roughness: 0.45, metalness: 0.15 });
+        const mesh = new THREE.Mesh(geomCache[gv.mesh], mat);
+        mesh.position.set(...gv.pos);
+        mesh.quaternion.copy(mq(gv.quat));
+        mesh.castShadow = !material;
+        const b = model.body(gv.body).id;
+        mesh.userData = { body: b };
+        groups[b].add(mesh);
+      }
+      robotBodies.forEach((b) => s3.add(groups[b]));
+      return groups;
+    }
+    const robot = makeRobot(null);
+    const ghost = makeRobot(new THREE.MeshStandardMaterial({ color: 0x4c8dff, transparent: true, opacity: 0.33,
+                                                             roughness: 0.6, depthWrite: false }));
+    const pickables = [...robotBodies.flatMap((b) => robot[b].children), ...dynamic];
+    // a line from where the hand holds to the cursor
+    const pull = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]),
+                                new THREE.LineBasicMaterial({ color: 0xff6b3d }));
+    pull.visible = false; pull.frustumCulled = false; s3.add(pull);
+    return { scene, model, data, ghostData, s3, sun, robot, ghost, robotBodies, sceneMeshes, dynamic, walls, pickables, pull };
+  }
+  function disposeWorld(w) {
+    w.s3.traverse((o) => { if (o.isMesh && !geomCache.includes(o.geometry)) o.geometry.dispose();
+                           if (o.material) { o.material.map?.dispose(); o.material.dispose(); } });
+    w.data.delete(); w.ghostData.delete(); w.model.delete();
+  }
+
+  // -- the worker's state, drawn ----------------------------------------------------------------
+  let paused = false, speed = 1, follow = true, showGhost = true, alignYaw = true, musicOn = true, noisy = true;
+  let drag = null, pendingCam = false;
+  const twist = (q) => 2 * Math.atan2(q[3], q[0]);
+  const robotQuat = () => [W.data.qpos[3], W.data.qpos[4], W.data.qpos[5], W.data.qpos[6]];
+  function onScene(id) {
+    const scene = SCENES.find((s) => s.id === id) || SCENES[0];
+    if (W) disposeWorld(W);
+    W = buildWorld(scene);
+    S = null;
+    $('scene').value = scene.id;
+    $('spawn').innerHTML = '';
+    scene.spawns.forEach((s, i) => $('spawn').append(new Option(s.label, i)));
+    poseScene(true);
+    pendingCam = true; lastMode = null;           // aim at the robot once its first state is in; redo the panel
+    setStatus('', '');
+  }
+  function onState(m) {
+    if (!W || m.scene !== W.scene.id) return;     // a state from the scene before a switch
+    const first = !S;
+    S = m;
+    W.data.qpos.set(m.qpos);
+    mj.mj_kinematics(W.model, W.data);
+    if (m.ghost) {
+      const q = W.ghostData.qpos;
+      q.set(m.ghost.q);
+      const r = alignYaw ? m.ghost.align : m.ghost.free;
+      for (let i = 0; i < 4; i++) q[3 + i] = r[i];
+      mj.mj_kinematics(W.model, W.ghostData);
+    }
+    if (first || pendingCam) {
+      pendingCam = false;
+      $('spawn').value = m.spawn;
+      const [ox, oy, oz] = W.scene.camera;
+      camera.position.set(m.qpos[0] + ox, m.qpos[1] + oy, oz + m.ground);
+      controls.target.set(m.qpos[0], m.qpos[1], 0.45 + m.ground);
+      poseScene(true);
+    }
+    if (m.mode !== lastMode || m.clip !== lastClip || m.lift !== lastLift) refreshUi();
+    if (m.mode === 'clip') syncAudio(m.clip !== lastClip); else syncAudio(false);
+    lastMode = m.mode; lastClip = m.clip; lastLift = m.lift;
+  }
+  let lastMode = null, lastClip = null, lastLift = null;
+
+  function poseGroups(groups, d) {
+    const xp = d.xpos, xq = d.xquat;
+    for (const b of W.robotBodies) {
+      groups[b].position.set(xp[3 * b], xp[3 * b + 1], xp[3 * b + 2]);
+      groups[b].quaternion.set(xq[4 * b + 1], xq[4 * b + 2], xq[4 * b + 3], xq[4 * b]);
+    }
+  }
+  function poseScene(all) {
+    const d = W.data, gx = d.geom_xpos, gm = d.geom_xmat;
+    for (const mesh of all ? W.sceneMeshes : W.dynamic) {
+      const g = mesh.userData.geom;
+      mesh.matrix.set(gm[9 * g], gm[9 * g + 1], gm[9 * g + 2], gx[3 * g], gm[9 * g + 3], gm[9 * g + 4], gm[9 * g + 5], gx[3 * g + 1],
+                      gm[9 * g + 6], gm[9 * g + 7], gm[9 * g + 8], gx[3 * g + 2], 0, 0, 0, 1);
+      mesh.matrixWorldNeedsUpdate = true;
+    }
+  }
+
+  // -- UI ---------------------------------------------------------------------------------------
+  function setStatus(text, cls) { $('status').textContent = text; $('status').className = cls; }
+  function syncAudio(force) {
+    const run = S && S.mode === 'clip' ? S.clip : null;
+    for (const k in audios) if (k !== run) audios[k].pause();
+    const a = run && audios[run];
+    if (!a) return;
+    if (!(musicOn && !paused)) { a.pause(); return; }
+    a.playbackRate = speed;
+    const t = S.frame / HZ;
+    if (force || Math.abs(a.currentTime - t) > 0.25) a.currentTime = t;
+    if (a.paused) a.play().catch(() => {});
+  }
+  function refreshUi() {
+    if (!S) return;
+    for (const el of $('actions').children) el.classList.toggle('on', el.dataset.run === (S.mode === 'clip' ? S.clip : S.mode === 'idle' ? 'idle' : ''));
+    $('seekrow').hidden = S.mode !== 'clip';
+    if (S.mode === 'clip') $('seek').max = S.nFrames - 1;
+    $('lift').firstChild.textContent = S.lift ? (S.lift === 1 ? '放下' : '放下中…') : '抱起来';
+    $('lift').classList.toggle('on', !!S.lift);
+    $('pol').textContent = S.mode === 'fallen' ? '阻尼保护（摔倒了）' : S.mode === 'clip' ? `${S.clipLabel} · ${S.clip}`
+      : S.mode === 'walk' ? `走路 · ${info.walk.run}`
+      : info.idle ? `待机站立 · ${info.idle.run}` : '待机（PD 保持站姿：没有待机策略）';
+    W.ghost.forEach((g) => g.visible = showGhost && S.mode === 'clip');
+  }
+  for (const s of SCENES) $('scene').append(new Option(s.label, s.id));
+  const idleBtn = Object.assign(document.createElement('button'), { className: 'act', textContent: '站立' });
+  idleBtn.dataset.run = 'idle';
+  idleBtn.title = '停下当前动作，回到待机站立';
+  idleBtn.onclick = () => send({ t: 'idle' });
+  $('actions').append(idleBtn);
+  function startClip(run, t0 = 0) {
+    const id = ++ackId;
+    send({ t: 'clip', run, t0, id });
+    return new Promise((res) => acks[id] = res);
+  }
+  for (const e of clips) {
+    const bt = Object.assign(document.createElement('button'), { className: 'act', textContent: e.label });
+    bt.dataset.run = e.run;
+    bt.title = e.run;
+    bt.onclick = () => startClip(e.run);
+    $('actions').append(bt);
+  }
+  if (!info.walk) { $('pad').querySelectorAll('button').forEach((b) => b.disabled = true); $('pad').title = '没有走路策略：make view 会打包 runs/velocity_*'; }
+  // W's speed: up to the fastest the walking policy was trained for (its bundle's meta.walk.vx)
+  const vxMax = info.walk && info.walk.vx ? info.walk.vx[1] : 0.4;
+  $('walkv').max = vxMax; $('walkv').value = Math.min(0.35, vxMax);
+  const walkSpeed = () => +$('walkv').value;
+  const showWalkSpeed = () => $('walkvl').textContent = `${walkSpeed().toFixed(2)} m/s`;
+  showWalkSpeed();
+  $('walkv').oninput = () => { showWalkSpeed(); if (held.has('w')) sendCommand(); };
+  const pushSpeed = () => +$('pushv').value;
+  const push = (dir = null) => send({ t: 'push', dir, speed: pushSpeed() });
+  const toggleLift = () => send({ t: 'lift' });
+  const throwBall = () => send({ t: 'ball', cam: [camera.position.x, camera.position.y, camera.position.z] });
+  const resetRobot = () => send({ t: 'reset' });
+  $('scene').onchange = (e) => send({ t: 'scene', id: e.target.value });
+  $('spawn').onchange = (e) => send({ t: 'spawn', i: +e.target.value });
+  $('reset').onclick = resetRobot;
+  $('push').onclick = () => push();
+  $('pushv').oninput = (e) => $('pushvl').textContent = `${(+e.target.value).toFixed(1)} m/s`;
+  $('lift').onclick = toggleLift;
+  $('ball').onclick = throwBall;
+  $('noise').onclick = (e) => { noisy = !noisy; e.target.classList.toggle('on', noisy); send({ t: 'noise', on: noisy });
+                                toast(noisy ? '噪声+延迟：开（和真机一样）' : '噪声+延迟：关（理想传感器）'); };
+  function setPaused(p) { paused = p; send({ t: 'pause', on: p }); $('pause').classList.toggle('on', p); $('pause').firstChild.textContent = p ? '继续' : '暂停'; syncAudio(true); }
+  $('pause').onclick = () => setPaused(!paused);
+  $('speed').onchange = (e) => { speed = +e.target.value; send({ t: 'speed', v: speed }); syncAudio(true); };
+  $('seek').oninput = (e) => { send({ t: 'seek', frame: +e.target.value }); setTimeout(() => syncAudio(true), 50); };
+  $('ghost').onclick = (e) => { showGhost = !showGhost; e.target.classList.toggle('on', showGhost); refreshUi(); };
+  $('align').onclick = (e) => { alignYaw = !alignYaw; e.target.classList.toggle('on', alignYaw); };
+  $('follow').onclick = (e) => { follow = !follow; e.target.classList.toggle('on', follow); };
+  $('music').onclick = (e) => { musicOn = !musicOn; e.target.classList.toggle('on', musicOn); syncAudio(true); };
+  $('fold').onclick = () => { $('hud').classList.toggle('min'); $('fold').textContent = $('hud').classList.contains('min') ? '+' : '–'; };
+
+  // walking: the held keys (keyboard or the on-screen pad) sum to one command
+  const held = new Set();
+  function sendCommand() {
+    const v = [0, 0, 0];
+    for (const k of held) (k === 'w' ? [walkSpeed(), 0, 0] : KEYS[k]).forEach((x, i) => v[i] += x);
+    send({ t: 'cmd', v });
+    for (const b of $('pad').children) b.classList.toggle('on', held.has(b.dataset.k));
+  }
+  const press = (k) => { if (!held.has(k)) { held.add(k); sendCommand(); } };
+  const release = (k) => { if (held.delete(k)) sendCommand(); };
+  for (const b of $('pad').children) {
+    b.addEventListener('pointerdown', (e) => { e.preventDefault(); b.setPointerCapture(e.pointerId); press(b.dataset.k); });
+    for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) b.addEventListener(ev, () => release(b.dataset.k));
+  }
+  addEventListener('blur', () => { held.clear(); sendCommand(); });
+  addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const k = e.key.toLowerCase();
+    if (k in KEYS) { e.preventDefault(); if (!e.repeat) press(k); }
+    else if (e.repeat) return;
+    else if (k === ' ') { e.preventDefault(); push(); }
+    else if (k === 'l') toggleLift();
+    else if (k === 'b') throwBall();
+    else if (k === 'r') resetRobot();
+    else if (k === 'p') setPaused(!paused);
+    else if (k.startsWith('arrow')) {                         // push away from the camera, or across
+      e.preventDefault();
+      const base = Math.atan2(controls.target.y - camera.position.y, controls.target.x - camera.position.x);
+      push(base + { arrowup: 0, arrowleft: Math.PI / 2, arrowdown: Math.PI, arrowright: -Math.PI / 2 }[k]);
+    }
+  });
+  addEventListener('keyup', (e) => { const k = e.key.toLowerCase(); if (k in KEYS) release(k); });
+  addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+
+  // dragging: the left button on the robot or a loose object holds it with a spring to the cursor
+  const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), plane = new THREE.Plane();
+  function pointer(e) { ndc.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); ray.setFromCamera(ndc, camera); }
+  renderer.domElement.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || !S) return;
+    pointer(e);
+    const hit = ray.intersectObjects(W.pickables, false)[0];
+    if (!hit) return;
+    const b = hit.object.userData.body, d = W.data, R = d.xmat, xp = d.xpos, p = hit.point;
+    const r = [p.x - xp[3 * b], p.y - xp[3 * b + 1], p.z - xp[3 * b + 2]];
+    const local = [0, 1, 2].map((k) => R[9 * b + k] * r[0] + R[9 * b + 3 + k] * r[1] + R[9 * b + 6 + k] * r[2]);
+    drag = { sx: e.clientX, sy: e.clientY, target: [p.x, p.y, p.z] };
+    send({ t: 'drag', body: b, local, target: drag.target, mass: W.model.body_subtreemass[W.model.body_rootid[b]] });
+    plane.setFromNormalAndCoplanarPoint(camera.getWorldDirection(new THREE.Vector3()).negate(), p.clone());
+    controls.enabled = false;                                 // OrbitControls ignores this press
+    renderer.domElement.setPointerCapture(e.pointerId);
+    e.stopImmediatePropagation();
+  }, true);
+  renderer.domElement.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    pointer(e);
+    drag.sx = e.clientX; drag.sy = e.clientY;
+    const p = new THREE.Vector3();
+    if (ray.ray.intersectPlane(plane, p)) { drag.target = [p.x, p.y, Math.max(0.02, p.z)]; send({ t: 'dragTo', target: drag.target }); }
+  });
+  const endDrag = () => { if (drag) { drag = null; controls.enabled = true; send({ t: 'dragEnd' }); } };
+  renderer.domElement.addEventListener('pointerup', endDrag);
+  renderer.domElement.addEventListener('pointercancel', endDrag);
+
+  // -- start -----------------------------------------------------------------------------------
+  await new Promise((res) => { const h = setInterval(() => { if (S) { clearInterval(h); res(); } }, 20); });
+  $('loading').remove(); $('hud').hidden = false; $('legend').hidden = false;
+  if (innerWidth < 640) $('fold').click();                     // a phone: the robot first, the panel one tap away
+  {
+    const want = clips.find((e) => e.run === params.get('run'));
+    if (want && (params.has('autoplay') || params.has('t'))) startClip(want.run, +params.get('t') || 0);
+  }
+
+  // drawn every animation frame from the latest state
+  function frame() {
+    requestAnimationFrame(frame);
+    if (!S) { renderer.render(W.s3, camera); return; }
+    const d = W.data;
+    poseGroups(W.robot, d);
+    poseScene(false);
+    if (showGhost && S.mode === 'clip' && S.ghost) poseGroups(W.ghost, W.ghostData);
+    if (drag && S.drag) {
+      W.pull.visible = true;
+      W.pull.geometry.setFromPoints([new THREE.Vector3(...S.drag.p), new THREE.Vector3(...drag.target)]);
+      // the pull, by the cursor, in newtons
+      const fl = $('force');
+      fl.hidden = false;
+      fl.textContent = `${S.drag.force.toFixed(0)} N${S.drag.capped ? '（上限）' : ''}`;
+      fl.classList.toggle('cap', !!S.drag.capped);
+      fl.style.left = `${Math.min(innerWidth - fl.offsetWidth - 8, drag.sx + 18)}px`;
+      fl.style.top = `${Math.max(8, drag.sy - 34)}px`;
+    } else { W.pull.visible = false; $('force').hidden = true; }
+    if (follow) {
+      const ry = twist(robotQuat()), gOff = showGhost && S.mode === 'clip' ? 0.42 : 0;
+      const tx = d.qpos[0] + gOff * Math.sin(ry), ty = d.qpos[1] - gOff * Math.cos(ry), tz = 0.45 + S.ground;
+      const dx = tx - controls.target.x, dy = ty - controls.target.y, dz = tz - controls.target.z;
+      controls.target.x += dx * 0.08; controls.target.y += dy * 0.08; controls.target.z += dz * 0.08;
+      camera.position.x += dx * 0.08; camera.position.y += dy * 0.08; camera.position.z += dz * 0.08;
+    }
+    W.sun.position.set(controls.target.x + 2, controls.target.y - 3, controls.target.z + 5);
+    W.sun.target.position.copy(controls.target);
+    for (const w of W.walls) {                                 // a wall between the camera and the room fades
+      const behind = camera.position.clone().sub(w.centre).dot(w.normal) < 0;
+      w.mesh.material.opacity = behind ? 0.12 : 1; w.mesh.material.depthWrite = !behind;
+    }
+    controls.update();
+    renderer.render(W.s3, camera);
+    if (S.mode === 'clip') { $('t').textContent = `${fmt(S.frame / HZ)} / ${fmt(S.nFrames / HZ)}`; $('seek').value = S.frame; }
+    $('rmse').textContent = S.err !== null ? `${S.err.toFixed(3)} rad` : '–';
+    $('yaw').textContent = S.dyaw !== null ? `${S.dyaw.toFixed(0)}°` : '–';
+    $('h').textContent = `${(d.qpos[2] - S.ground).toFixed(3)} m${S.lift ? '（抱着）' : ''}`;
+    $('cmd').textContent = S.mode === 'walk'
+      ? `前 ${S.cmd[0].toFixed(2)} · 侧 ${S.cmd[1].toFixed(2)} m/s · 转 ${S.cmd[2].toFixed(2)} rad/s`
+      : '–';
+    $('vel').textContent = S.mode === 'walk' ? `前 ${S.velGot[0].toFixed(2)} · 侧 ${S.velGot[1].toFixed(2)} m/s` : '–';
+    $('rt').textContent = S.paused ? '暂停' : `${(S.rt * 100).toFixed(0)}%${S.speed !== 1 ? `（${S.speed}× 慢放）` : ''}` +
+      (S.noisy ? ` · 延迟 ${S.delays.act}+${S.delays.obs} ms` : '');
+  }
+  requestAnimationFrame(frame);
+  window.__sim = () => ({ mode: S.mode, frame: S.frame, clip: S.clip, x: S.qpos[0], y: S.qpos[1], z: S.qpos[2],
+                          yaw: twist([S.qpos[3], S.qpos[4], S.qpos[5], S.qpos[6]]),
+                          simTime: S.simTime, rt: S.rt, scene: S.scene, lift: !!S.lift, cmd: S.cmd, velGot: S.velGot, status: $('status').textContent });
+  window.__ctl = { startClip, push, toggleLift, throwBall, resetRobot,
+                   loadScene: (id) => send({ t: 'scene', id }),
+                   setNoise: (on) => send({ t: 'noise', on }),
+                   spawnAt: (i) => send({ t: 'spawn', i }),
+                   // walking: hold keys (e.g. 'w', 'wa'), or release them all with ''
+                   hold: (keys) => { held.clear(); for (const k of keys) held.add(k); sendCommand(); },
+                   // tests: where a world point is on screen, and a body's position
+                   project: (x, y, z) => { const v = new THREE.Vector3(x, y, z).project(camera);
+                                           return [(v.x + 1) / 2 * innerWidth, (1 - v.y) / 2 * innerHeight]; },
+                   body: (name) => { const b = W.model.body(name).id; return [0, 1, 2].map((k) => W.data.xpos[3 * b + k]); },
+                   bodyNames: () => Array.from({ length: W.model.nbody }, (_, i) => W.model.body(i).name) };
+} catch (e) { fail(e); }
+</script>
+</body>
+</html>

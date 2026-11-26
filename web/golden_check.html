@@ -1,0 +1,38 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Q1 contract golden-trace check</title>
+<pre id="log">running…</pre>
+<script type="module">
+const log = (s) => { console.log(s); document.getElementById('log').textContent += '\n' + s; };
+window.DONE = false; window.RESULT = null;
+try {
+  const { Contract, checkGoldenTrace } = await import('./contract.js');
+  // Bundles are re-exported in place, and http.server lets the browser cache them by heuristic:
+  // revalidate every data file so a fresh export is never shadowed by a stale copy.
+  const get = (u) => fetch(u, { cache: 'no-cache' });
+  const base = '../robots/q1/contract/';
+  const [bundle, trace] = await Promise.all(
+    ['contract.json', 'golden_trace.json'].map((f) => get(base + f).then((r) => r.json())));
+
+  log(`contract.json  hash ${bundle._source_hash}  joints ${bundle.n_joints}`);
+  log(`golden_trace   contract=${trace.contract}  steps=${trace.records.length}  tol=${trace.tolerance}`);
+
+  const c = new Contract(bundle, trace.contract);
+  log(`loaded         obs ${c.obsDim}->${c.onnxObsDim}  ${c.policyHz} Hz  decimation ${c.decimation}`);
+
+  const r = checkGoldenTrace(bundle, trace);
+  log('');
+  log(`max |obs_js - obs_py|     ${r.maxObsDiff.toExponential(3)}`);
+  log(`max |target_js - target_py| ${r.maxTargetDiff.toExponential(3)}`);
+  if (r.worstObs) {
+    const w = r.worstObs;
+    const field = c.fields.find((f) => w.index >= f.start && w.index < f.start + f.size);
+    log(`worst at step ${w.step} index ${w.index} (field ${field ? field.name : '?'}): ` +
+        `js=${w.js} py=${w.py}`);
+  }
+  log('');
+  log(r.ok ? 'PASS  JS and Python agree within tolerance' : 'FAIL  builders disagree');
+  window.RESULT = r;
+} catch (e) { log('ERROR ' + (e && e.stack || e)); }
+window.DONE = true;
+</script>

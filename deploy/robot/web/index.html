@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Q1 舞蹈</title>
+<style>
+  :root { --bg:#0f1115; --card:#191c22; --line:#2a2e37; --fg:#e8eaed; --dim:#9aa0a6;
+          --ok:#34c759; --warn:#ff9f0a; --bad:#ff453a; --accent:#4c8dff; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         font:16px/1.5 -apple-system, "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; }
+  main { max-width:560px; margin:0 auto; padding:16px 16px 40px; }
+  h1 { font-size:22px; margin:8px 0 12px; }
+  h2 { font-size:14px; color:var(--dim); font-weight:600; margin:22px 0 8px; letter-spacing:.04em; }
+  .status { display:flex; align-items:center; gap:10px; background:var(--card); border:1px solid var(--line);
+            border-radius:12px; padding:12px 14px; }
+  .dot { width:10px; height:10px; border-radius:50%; background:var(--dim); flex:none; }
+  .dot.ok { background:var(--ok); } .dot.busy { background:var(--warn); } .dot.bad { background:var(--bad); }
+  .status b { font-weight:600; } .status small { color:var(--dim); display:block; font-size:13px; }
+  .grid { display:grid; gap:10px; }
+  button.motion { display:flex; justify-content:space-between; align-items:center; width:100%; text-align:left;
+                  background:var(--card); color:var(--fg); border:1px solid var(--line); border-radius:12px;
+                  padding:14px; font:inherit; cursor:pointer; }
+  button.motion span.name { font-size:13px; color:var(--dim); }
+  button.motion:disabled { opacity:.45; cursor:not-allowed; }
+  button.motion:not(:disabled):active { border-color:var(--accent); }
+  .play { color:var(--accent); font-weight:600; flex:none; margin-left:12px; }
+  .msg { margin-top:14px; padding:10px 12px; border-radius:10px; font-size:14px; display:none; }
+  .msg.show { display:block; } .msg.ok { background:#12301c; color:#8ee6a4; } .msg.bad { background:#3a1414; color:#ffb4ae; }
+  .note { color:var(--dim); font-size:13px; margin-top:24px; }
+  h3 { font-size:13px; color:var(--dim); font-weight:500; margin:14px 0 8px; }
+  .modes { display:flex; gap:10px; margin-top:10px; }
+  .modes button { flex:1; font:inherit; font-size:14px; padding:10px; border-radius:10px; border:1px solid var(--line);
+                  background:var(--card); color:var(--fg); }
+  .modes button.on { border-color:var(--accent); color:var(--accent); }
+  .modes button:disabled { opacity:.45; }
+  .risk { color:var(--bad); font-size:12px; margin-left:6px; }
+  dialog { background:var(--card); color:var(--fg); border:1px solid var(--line); border-radius:14px; padding:18px;
+           max-width:340px; width:calc(100% - 32px); }
+  dialog::backdrop { background:rgba(0,0,0,.6); }
+  dialog p { margin:0 0 14px; } dialog .row { display:flex; gap:10px; justify-content:flex-end; }
+  dialog button { font:inherit; border-radius:10px; padding:8px 16px; border:1px solid var(--line);
+                  background:transparent; color:var(--fg); }
+  dialog button.go { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .music { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:12px;
+           font-size:14px; color:var(--dim); }
+  .music label { display:flex; align-items:center; gap:6px; }
+  .music input { width:auto; margin:0; }
+  .music button { font:inherit; font-size:13px; padding:6px 12px; border-radius:10px; border:1px solid var(--line);
+                  background:var(--card); color:var(--fg); flex:none; }
+  input { width:100%; font:inherit; padding:10px 12px; border-radius:10px; border:1px solid var(--line);
+          background:var(--bg); color:var(--fg); margin-bottom:14px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Q1 舞蹈</h1>
+  <div class="status"><div class="dot" id="dot"></div><div><b id="st">连接中…</b><small id="sub"></small></div></div>
+  <div class="modes">
+    <button id="mwalk" data-mode="BIPED_WALK_RUN" disabled>走跑模式<br><small>全身动作</small></button>
+    <button id="mupper" data-mode="BIPED_WHOLE_BODY_CTRL" disabled>全身控制模式<br><small>上肢动作</small></button>
+  </div>
+  <div class="music">
+    <label><input type="checkbox" id="phone"> 音乐用手机播放（默认用机器人喇叭）</label>
+    <button id="stopmusic">停止音乐</button>
+  </div>
+  <div id="lists"></div>
+  <div class="msg" id="msg"></div>
+  <p class="note">全身动作要在走跑模式下播放，上肢动作要在全身控制模式下播放；两种模式只能在机器人站着时互相切换。标红的动作会躺下、坐下或者翻转，播放前请确认场地。急停请用遥控器。</p>
+</main>
+
+<dialog id="confirm"><p id="ctext"></p>
+  <div class="row"><button id="cno">取消</button><button class="go" id="cyes">播放</button></div></dialog>
+<dialog id="keydlg"><p>请输入访问口令</p><input id="keyin" autocomplete="off">
+  <div class="row"><button class="go" id="keyok">确定</button></div></dialog>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let key = "";
+try { key = localStorage.getItem("q1rl_key") || ""; } catch (e) {}
+// a link like http://<robot>:8090/#key=XXXX carries the key, so a phone needs no typing
+const fromUrl = new URLSearchParams(location.hash.slice(1)).get("key");
+if (fromUrl) { key = fromUrl; try { localStorage.setItem("q1rl_key", key); } catch (e) {} history.replaceState(null, "", location.pathname); }
+let st = { action: "", status: 0 }, busy = false, motions = [];
+const player = new Audio(); player.preload = "auto";
+try { $("phone").checked = localStorage.getItem("q1rl_phone") === "1"; } catch (e) {}
+$("phone").onchange = () => { try { localStorage.setItem("q1rl_phone", $("phone").checked ? "1" : "0"); } catch (e) {} };
+const WALK = "BIPED_WALK_RUN", UPPER = "BIPED_WHOLE_BODY_CTRL";
+
+async function api(path, body) {
+  const r = await fetch(path, { method: body ? "POST" : "GET", headers: { "X-Key": key, "Content-Type": "application/json" },
+                                body: body ? JSON.stringify(body) : undefined });
+  if (r.status === 403) { askKey(); throw new Error("口令不对"); }
+  return r.json();
+}
+
+function askKey() {
+  if ($("keydlg").open) return;
+  $("keyin").value = key; $("keydlg").showModal();
+}
+$("keyok").onclick = () => {
+  key = $("keyin").value.trim();
+  try { localStorage.setItem("q1rl_key", key); } catch (e) {}
+  $("keydlg").close(); load();
+};
+
+function say(text, ok) { const m = $("msg"); m.textContent = text; m.className = "msg show " + (ok ? "ok" : "bad"); }
+
+const NAMES = { BIPED_WALK_RUN: "走跑模式", BIPED_WHOLE_BODY_CTRL: "全身控制模式", PASSIVE_DEFAULT: "无力矩（被动）",
+                MIMIC_OPENSOURCE_V2: "正在做全身动作", MIMIC: "正在做全身动作", MIMIC_V2: "正在做全身动作" };
+const isReady = (mode) => !st.nav && !st.settling && st.action === mode && st.status === 100;
+
+function refresh() {
+  const standing = isReady(WALK) || isReady(UPPER);
+  for (const b of [$("mwalk"), $("mupper")]) {
+    b.classList.toggle("on", st.action === b.dataset.mode);
+    b.disabled = busy || !standing || st.action === b.dataset.mode;
+  }
+  document.querySelectorAll("button.motion").forEach((b) => {
+    const m = motions.find((x) => x.id === b.dataset.id);
+    b.disabled = busy || !m || m.unsupported || !isReady(m.mode);
+  });
+}
+
+async function poll() {
+  try {
+    const s = await api("/api/status");
+    if (s.error) throw new Error(s.error);
+    st = s;
+    const moving = /MIMIC/.test(s.action);
+    const ok = isReady(WALK) || isReady(UPPER);
+    $("dot").className = "dot " + (ok ? "ok" : moving ? "busy" : "bad");
+    $("st").textContent = NAMES[s.action] || s.action;
+    $("sub").textContent = s.nav ? "导航 / 跟随在控制走路，先把它关掉" : s.settling ? "模式刚变过，稍等几秒" : isReady(WALK) ? "可以播放全身动作" : isReady(UPPER) ? "可以播放上肢动作"
+      : moving ? "动作进行中，结束后会自动回到走跑模式" : "需要先用遥控器把机器人站起来";
+  } catch (e) {
+    st = { action: "", status: 0 };
+    $("dot").className = "dot bad"; $("st").textContent = "连不上运控"; $("sub").textContent = String(e.message || e);
+  }
+  refresh();
+}
+
+function section(title, subs) {
+  const h = document.createElement("h2"); h.textContent = title; $("lists").appendChild(h);
+  for (const [sub, items] of subs) {
+    if (!items.length) continue;
+    const h3 = document.createElement("h3"); h3.textContent = sub; $("lists").appendChild(h3);
+    const grid = document.createElement("div"); grid.className = "grid";
+    for (const m of items) {
+      const b = document.createElement("button"); b.className = "motion"; b.disabled = true; b.dataset.id = m.id;
+      b.innerHTML = `<div><div class="label"></div><span class="name"></span></div><span class="play"></span>`;
+      b.querySelector(".label").textContent = m.label;
+      if (m.risky) { const r = document.createElement("span"); r.className = "risk"; r.textContent = "注意"; b.querySelector(".label").appendChild(r); }
+      b.querySelector(".name").textContent = m.name;
+      b.querySelector(".play").textContent = m.unsupported ? "—" : "播放";
+      if (m.note) b.querySelector(".name").textContent = `${m.name} · ${m.note}`;
+      b.onclick = () => confirmPlay(m);
+      grid.appendChild(b);
+    }
+    $("lists").appendChild(grid);
+  }
+}
+
+async function load() {
+  try {
+    motions = await api("/api/motions");
+    if (motions.error) throw new Error(motions.error);
+    $("lists").innerHTML = "";
+    const pick = (g, k) => motions.filter((m) => m.group === g && m.kind === k);
+    section("官方动作", [["全身动作 · 走跑模式下播放", pick("official", "whole")], ["上肢动作 · 全身控制模式下播放", pick("official", "upper")]]);
+    section("自定义动作", [["全身动作 · 走跑模式下播放", pick("custom", "whole")], ["上肢动作 · 全身控制模式下播放", pick("custom", "upper")]]);
+    poll();
+  } catch (e) { if (String(e.message) !== "口令不对") say("加载动作列表失败：" + (e.message || e), false); }
+}
+
+function ask(text, label, run, onTap) {
+  $("ctext").textContent = text; $("cyes").textContent = label;
+  $("cyes").onclick = async () => {
+    if (onTap) onTap();                    // inside the tap: phones only let sound start here
+    $("confirm").close(); busy = true; refresh();
+    try { await run(); } catch (e) { say(String(e.message || e), false); }
+    busy = false; setTimeout(poll, 300);
+  };
+  $("cno").onclick = () => $("confirm").close();
+  $("confirm").showModal();
+}
+
+function confirmPlay(m) {
+  const warn = m.risky ? "这个动作会躺下、坐下或翻转，请确认地面和周围空间。" : "请确认机器人周围有足够空间。";
+  const phone = $("phone").checked && typeof m.music === "string";
+  ask(`播放「${m.label}」？${warn}遥控器请拿在手里。`, "播放", async () => {
+    const r = await api("/api/play", { id: m.id, phone_music: phone });
+    if (!r.ok) { player.pause(); return say(r.error || "播放失败", false); }
+    say(`已开始：${m.label}` + (m.music ? (phone ? "（手机放音乐）" : "（机器人放音乐）") : "") + (r.note ? "。" + r.note : ""), true);
+    if (phone && r.music) {
+      const go = () => { player.currentTime = 0; player.play().catch((e) => say("手机放音乐失败：" + e.message, false)); };
+      r.music.offset_s > 0 ? setTimeout(go, r.music.offset_s * 1000) : go();
+    }
+  }, phone ? () => {                      // unlock the audio element during the tap
+    player.src = m.music + "?key=" + encodeURIComponent(key);
+    player.play().then(() => player.pause()).catch(() => {});
+  } : null);
+}
+
+$("stopmusic").onclick = async () => {
+  player.pause();
+  try { await api("/api/stop_music", {}); say("音乐已停止", true); } catch (e) { say(String(e.message || e), false); }
+};
+
+for (const b of [$("mwalk"), $("mupper")]) {
+  b.onclick = () => ask(`切到${b.dataset.mode === WALK ? "走跑模式" : "全身控制模式"}？`, "切换", async () => {
+    const r = await api("/api/mode", { mode: b.dataset.mode });
+    r.ok ? say("已切换" + (r.note ? "。" + r.note : ""), true) : say(r.error || "切换失败", false);
+  });
+}
+
+if (!key) askKey(); else load();
+setInterval(poll, 1000);
+</script>
+</body>
+</html>

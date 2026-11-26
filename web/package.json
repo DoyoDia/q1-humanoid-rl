@@ -1,0 +1,21 @@
+{
+  "name": "q1-web",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@mujoco/mujoco": "^3.13.0",
+    "onnxruntime-web": "^1.30.0",
+    "three": "0.160.0"
+  },
+  "devDependencies": {
+    "ws": "^8.22.0"
+  }
+}
